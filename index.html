@@ -582,7 +582,22 @@ select{
 }
 </style>
 </head>
-<body>
+<body><style>
+body:not(.authenticated) .topnav,body:not(.authenticated) .shell{display:none!important}
+#nova-login{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0%,rgba(255,176,32,.12),transparent 42%),var(--ink)}
+#nova-login .login-card{width:min(440px,100%);background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:30px;box-shadow:0 24px 70px rgba(0,0,0,.35)}
+#nova-login h1{color:var(--accent);font-size:24px;margin-bottom:8px}
+#nova-login p{color:var(--dim);font-size:13px;margin-bottom:22px}
+#nova-login label{display:block;color:#B6C3D5;font-size:12px;margin:12px 0 7px}
+#nova-login input{direction:ltr;text-align:left}
+#nova-login button{width:100%;justify-content:center;margin-top:18px}
+#login-error{color:var(--coral);font-size:12px;min-height:18px;margin-top:10px}
+.data-table button{border:1px solid var(--line);background:transparent;color:var(--accent);border-radius:7px;padding:5px 8px;font:inherit;cursor:pointer}
+</style>
+<section id="nova-login"><div class="login-card"><h1>NOVA CONTROL</h1><p>تسجيل دخول المشرف — إدارة الأجهزة والاشتراكات</p>
+<form id="login-form"><label>البريد الإلكتروني</label><input id="login-email" type="email" autocomplete="username" value="kyaniky01@gmail.com" required>
+<label>كلمة المرور</label><input id="login-password" type="password" autocomplete="current-password" required>
+<button class="btn btn-fill" type="submit">تسجيل الدخول</button><div id="login-error"></div></form></div></section>
 
 <!-- شريط علوي أفقي -->
 <header class="topnav">
@@ -832,14 +847,34 @@ select{
 
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
 <script>
-document.getElementById('search').addEventListener('input', function(){
-  const value = this.value.toLowerCase();
-  document.querySelectorAll('#deviceRows tr').forEach(row=>{
-    row.style.display = row.innerText.toLowerCase().includes(value)
-      ? '' : 'none';
-  });
-});
-</script>
-</body>
+(()=> {
+const sb=window.supabase.createClient("https://ganqdgstfriegfwainoz.supabase.co","sb_publishable_yOn2frVZ8pJlzscXrzwZpw_8BeGXa1L");
+const $=s=>document.querySelector(s), esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const dt=v=>v?new Date(v).toLocaleDateString("ar"):"—";let devices=[],plans=[],servers=[];
+async function api(action,payload={}){const {data,error}=await sb.functions.invoke("admin-api",{body:{action,payload}});if(error)throw error;if(data?.error)throw Error(data.error+(data.detail?": "+data.detail:""));return data?.data??data;}
+async function load(){
+const s=await api("dashboard.summary"),n=[s.devices,s.activeDevices,s.expiredSubscriptions,s.activeServers];
+document.querySelectorAll(".stat-value").forEach((e,i)=>e.textContent=Number(n[i]??0).toLocaleString("en-US"));
+devices=await api("devices.list");plans=await api("plans.list");servers=await api("servers.list");
+$("#deviceRows").innerHTML=devices.length?devices.map(d=>{const sub=(d.subscriptions||[]).find(x=>x.status==="active"),host=(d.device_server_assignments||[])[0]?.servers?.name||"—",st=d.status==="blocked"?"محظور":d.status==="revoked"?"ملغي":sub&&new Date(sub.ends_at)<new Date()?"منتهي":"نشط",cl=st==="نشط"?"pill-ok":st==="محظور"||st==="ملغي"?"pill-bad":"pill-warn";return '<tr><td class="mono">'+esc(d.device_uid)+'</td><td>'+esc(d.device_name||d.model||d.platform)+'</td><td>'+esc(host)+'</td><td><span class="pill '+cl+'">'+st+'</span></td><td>'+dt(sub?.ends_at)+'</td><td><button data-block="'+esc(d.id)+'">'+(d.status==="blocked"?"رفع الحظر":"حظر")+'</button></td></tr>'}).join(""):'<tr><td colspan="6">لا توجد أجهزة مسجلة بعد</td></tr>';
+$("#deviceRows").querySelectorAll("[data-block]").forEach(b=>b.onclick=async()=>{const d=devices.find(x=>x.id===b.dataset.block);if(!d)return;if(!confirm("تأكيد تغيير حالة الجهاز؟"))return;await api("devices.update",{id:d.id,status:d.status==="blocked"?"active":"blocked"});await load();});
+$("#subscriptions tbody").innerHTML=devices.flatMap(d=>(d.subscriptions||[]).map(x=>({d,x}))).map(({d,x})=>'<tr><td class="mono">'+esc(d.device_uid)+'</td><td>'+esc(x.subscription_plans?.name||"اشتراك")+'</td><td>'+dt(x.starts_at)+'</td><td>'+dt(x.ends_at)+'</td><td>'+esc(x.status)+'</td></tr>').join("")||'<tr><td colspan="5">لا توجد اشتراكات</td></tr>';
+$(".hosts").innerHTML=servers.map(s=>'<div class="host-card"><div class="host-head"><div class="host-name">'+esc(s.name)+'</div><span class="pill '+(s.is_active?"pill-ok":"pill-warn")+'">'+(s.is_active?"نشط":"متوقف")+'</span></div><div class="host-url">'+esc(s.server_url)+'</div><div class="host-meta">'+esc(s.region||"")+' <span class="host-devices">أولوية '+esc(s.priority)+'</span></div></div>').join("")||'<p class="empty-note">لا توجد هوستات</p>';
+$("#activity .block-body").innerHTML=(s.recentActivity||[]).map(x=>'<p class="empty-note">'+esc(x.action)+' · '+esc(x.entity_type)+' · '+dt(x.created_at)+'</p>').join("")||'<p class="empty-note">لا توجد نشاطات بعد</p>';
+}
+async function signedIn(user){
+document.body.classList.add("authenticated");$("#nova-login").style.display="none";
+const chip=$(".user-chip");if(chip){chip.innerHTML='<span class="avatar">N</span>'+esc(user.email)+' · خروج';chip.onclick=async()=>{await sb.auth.signOut();location.reload()};}
+if((user.email||"").toLowerCase()==="kyaniky01@gmail.com"){try{await sb.functions.invoke("bootstrap-owner")}catch(e){console.info("owner bootstrap:",e.message)}}
+try{await load()}catch(e){alert("تعذر تحميل بيانات NOVA: "+e.message);await sb.auth.signOut();location.reload()}
+}
+$("#login-form").onsubmit=async e=>{e.preventDefault();const b=e.currentTarget.querySelector("button");b.disabled=true;b.textContent="جارٍ التحقق...";$("#login-error").textContent="";const {data,error}=await sb.auth.signInWithPassword({email:$("#login-email").value.trim(),password:$("#login-password").value});b.disabled=false;b.textContent="تسجيل الدخول";if(error){$("#login-error").textContent="تعذر تسجيل الدخول: "+error.message;return}await signedIn(data.user)};
+sb.auth.getSession().then(({data})=>{if(data.session)signedIn(data.session.user)});
+sb.auth.onAuthStateChange((event,session)=>{if(event==="SIGNED_OUT"||!session){document.body.classList.remove("authenticated");$("#nova-login").style.display="grid"}});
+document.querySelectorAll(".btn").forEach(b=>{if(b.textContent.includes("إضافة جهاز"))b.onclick=async()=>{const uid=prompt("Device ID");if(!uid)return;const name=prompt("اسم الجهاز")||"";try{await api("devices.create",{device_uid:uid,device_name:name,platform:"android_tv"});await load()}catch(e){alert(e.message)}};if(b.textContent.includes("إضافة هوست"))b.onclick=async()=>{const name=prompt("اسم الهوست");if(!name)return;const server_url=prompt("رابط الخادم");if(!server_url)return;try{await api("servers.create",{name,server_url});await load()}catch(e){alert(e.message)}};if(b.textContent.includes("إضافة اشتراك"))b.onclick=async()=>{if(!devices.length||!plans.length){alert("أضف جهازاً وخطة أولاً");return}const uid=prompt("أدخل Device ID");const d=devices.find(x=>x.device_uid===uid);if(!d){alert("الجهاز غير موجود");return}const choice=Number(prompt(plans.map((p,i)=>(i+1)+": "+p.name+" ("+p.duration_days+" يوم)").join("\n")+"\nاختر رقم الخطة"));const p=plans[choice-1];if(!p)return;try{await api("subscriptions.create",{device_id:d.id,plan_id:p.id});await load()}catch(e){alert(e.message)}};if(b.textContent.includes("تصدير التقرير"))b.onclick=()=>{const csv=["Device ID,Name,Platform,Status",...devices.map(d=>[d.device_uid,d.device_name||"",d.platform,d.status].map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(","))].join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"}));a.download="nova-devices.csv";a.click();URL.revokeObjectURL(a.href)}});
+const search=$("#search");if(search)search.oninput=()=>document.querySelectorAll("#deviceRows tr").forEach(r=>r.style.display=r.innerText.toLowerCase().includes(search.value.toLowerCase())?"":"none");
+})();
+</script></body>
 </html>
