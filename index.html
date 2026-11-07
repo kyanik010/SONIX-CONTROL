@@ -73,6 +73,99 @@ body:not(.authenticated) .app{display:none!important}
 .theme-editor input[type=text]{width:100%;margin:8px 0 16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#0d151f;color:var(--text)}
 @media(max-width:560px){.theme-editor-grid{grid-template-columns:1fr}.theme-editor{padding:17px;border-radius:18px}}
 
+
+/* SONIX signature artwork: luminous ribbons, gradient metal and living light */
+.preset-card{
+  isolation:isolate;
+  background:
+    radial-gradient(ellipse at 90% 0%,color-mix(in srgb,var(--preset-accent) 19%,transparent),transparent 43%),
+    linear-gradient(145deg,var(--preset-bg1),var(--preset-bg2) 54%,var(--preset-bg3))!important;
+}
+.preset-card:after{
+  content:"";position:absolute;z-index:-1;inset:34% -22% -30% 22%;
+  pointer-events:none;opacity:.24;
+  background:repeating-linear-gradient(128deg,transparent 0 17px,color-mix(in srgb,var(--preset-accent) 20%,transparent) 18px 19px,transparent 20px 37px);
+  mask-image:linear-gradient(110deg,transparent,#000 38%,transparent 88%);
+}
+.preset-scene{
+  height:94px!important;
+  background:
+    radial-gradient(ellipse at 82% 15%,color-mix(in srgb,var(--preset-accent) 48%,transparent),transparent 34%),
+    radial-gradient(ellipse at 10% 110%,color-mix(in srgb,var(--preset-glow) 62%,transparent),transparent 53%),
+    linear-gradient(118deg,var(--preset-bg1),var(--preset-bg2) 48%,var(--preset-bg3))!important;
+  background-size:150% 150%!important;
+  animation:sonixSceneDrift 13s ease-in-out infinite alternate;
+}
+.preset-scene:before{
+  inset:12% 23% -82% -18%!important;
+  width:125%;height:145%;
+  border:2px solid transparent!important;
+  border-bottom-color:color-mix(in srgb,var(--preset-accent) 88%,transparent)!important;
+  border-radius:50%!important;
+  transform:rotate(-17deg)!important;
+  box-shadow:0 8px 18px color-mix(in srgb,var(--preset-accent) 20%,transparent),0 0 26px color-mix(in srgb,var(--preset-accent) 34%,transparent)!important;
+  filter:drop-shadow(0 0 5px color-mix(in srgb,var(--preset-accent) 70%,transparent));
+  animation:sonixRibbonFloat 8s ease-in-out infinite alternate;
+}
+.preset-scene:after{
+  inset:0!important;
+  opacity:.8;
+  mix-blend-mode:screen;
+  background:
+    linear-gradient(112deg,transparent 5%,#ffffff08 27%,#ffffff38 31%,transparent 35% 100%),
+    repeating-linear-gradient(165deg,transparent 0 24px,color-mix(in srgb,var(--preset-accent) 13%,transparent) 25px 26px,transparent 27px 47px)!important;
+  animation:sonixSilkShimmer 9s linear infinite;
+}
+.preset-scene span{
+  width:160px!important;height:160px!important;
+  right:48%!important;top:-98px!important;
+  border:1px solid color-mix(in srgb,var(--preset-accent) 52%,transparent);
+  background:radial-gradient(circle,color-mix(in srgb,var(--preset-accent) 32%,transparent),transparent 68%)!important;
+  box-shadow:0 0 30px color-mix(in srgb,var(--preset-accent) 32%,transparent),inset 0 0 24px color-mix(in srgb,var(--preset-accent) 15%,transparent);
+  animation:sonixOrbPulse 6s ease-in-out infinite alternate;
+}
+.preset-scene i{
+  width:76%!important;height:34px!important;
+  right:8%!important;bottom:4px!important;
+  border:1px solid transparent!important;
+  border-bottom:2px solid var(--preset-accent)!important;
+  border-radius:50%!important;
+  background:transparent!important;
+  transform:rotate(-9deg)!important;
+  filter:drop-shadow(0 0 5px var(--preset-accent));
+  opacity:.9;
+}
+.preset-scene i:before,.preset-scene i:after{
+  content:"";position:absolute;inset:7px -8% -5px 8%;
+  border-bottom:1px solid color-mix(in srgb,var(--preset-accent) 66%,transparent);
+  border-radius:50%;transform:rotate(5deg);
+}
+.preset-scene i:after{inset:14px 4% -12px -6%;opacity:.55;transform:rotate(-4deg)}
+.preset-scene b{
+  width:56px!important;height:56px!important;left:12%!important;bottom:-34px!important;
+  border:1px solid color-mix(in srgb,var(--preset-accent) 85%,transparent)!important;
+  box-shadow:0 0 18px color-mix(in srgb,var(--preset-accent) 55%,transparent),inset 0 0 15px color-mix(in srgb,var(--preset-accent) 22%,transparent);
+  background:radial-gradient(circle at 35% 25%,#ffffff35,transparent 58%);
+}
+.preset-card[data-atmosphere="pearl-marble"] .preset-scene,
+.preset-card[data-atmosphere="carrara-marble"] .preset-scene{
+  background-image:repeating-linear-gradient(132deg,transparent 0 17px,#ffffff12 18px 19px,transparent 20px 39px),radial-gradient(ellipse at 82% 15%,color-mix(in srgb,var(--preset-accent) 38%,transparent),transparent 36%),linear-gradient(125deg,var(--preset-bg1),var(--preset-bg2),var(--preset-bg3))!important;
+}
+.preset-card[data-atmosphere="ruby-velvet"] .preset-scene:before,
+.preset-card[data-atmosphere="imperial-amethyst"] .preset-scene:before{border-bottom-width:3px!important;filter:blur(.2px) drop-shadow(0 0 8px var(--preset-accent))}
+.preset-card[data-atmosphere="black-onyx"] .preset-scene:after,
+.preset-card[data-atmosphere="midnight-sapphire"] .preset-scene:after{opacity:1;background:linear-gradient(110deg,transparent 30%,#ffffff48 48%,transparent 53%)!important}
+.preset-card[data-atmosphere="emerald-palace"] .preset-scene span,
+.preset-card[data-atmosphere="royal-navy"] .preset-scene span{box-shadow:0 0 42px color-mix(in srgb,var(--preset-accent) 48%,transparent),inset 0 0 26px color-mix(in srgb,var(--preset-accent) 24%,transparent)}
+.preset-card .preset-swatches i{position:relative;overflow:hidden}
+.preset-card .preset-swatches i:first-child:after{content:"";position:absolute;inset:0;background:linear-gradient(120deg,transparent 25%,#ffffff48 50%,transparent 72%);opacity:.7}
+@keyframes sonixSceneDrift{0%{background-position:0% 40%}100%{background-position:100% 65%}}
+@keyframes sonixRibbonFloat{0%{transform:rotate(-21deg) translateY(0)}100%{transform:rotate(-12deg) translateY(-7px)}}
+@keyframes sonixSilkShimmer{0%{background-position:-140px 0,0 0}100%{background-position:260px 0,0 0}}
+@keyframes sonixOrbPulse{0%{transform:scale(.92);opacity:.55}100%{transform:scale(1.08);opacity:1}}
+@media(hover:hover){.preset-card:hover .preset-scene{filter:saturate(1.18) brightness(1.08);transform:translateY(-1px)}}
+@media(prefers-reduced-motion:reduce){.preset-scene,.preset-scene:before,.preset-scene:after,.preset-scene span{animation:none!important;transition:none!important}}
+
 </style>
 </head>
 <body>
