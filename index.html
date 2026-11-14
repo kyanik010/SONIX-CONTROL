@@ -553,6 +553,19 @@ select{
 }
 
 /* ===== استجابة ===== */
+.release-form{background:var(--ink-2);border:1px solid var(--line-soft);border-radius:12px;padding:18px;margin:18px 0 24px}
+.release-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.release-grid label{display:flex;flex-direction:column;gap:7px;color:#AEBBD0;font-size:12px;font-weight:600}
+.release-grid input,.release-grid select,.release-grid textarea{width:100%;min-width:0}
+.release-grid select[multiple]{height:auto;min-height:94px;background-image:none;padding:8px}
+.release-grid textarea{background:var(--ink-2);border:1px solid var(--line);border-radius:10px;padding:11px 15px;color:var(--text);font:inherit;resize:vertical}
+.release-wide{grid-column:1/-1}
+.release-actions{display:flex;align-items:center;gap:14px;margin-top:16px;flex-wrap:wrap}
+.release-hint{font-size:11px;color:var(--dim)}
+.release-table{margin-top:18px}
+.release-table td button{margin-inline-start:5px}
+@media(max-width:600px){.release-grid{grid-template-columns:1fr}.release-wide{grid-column:auto}.release-form{padding:13px}}
+
 @media(max-width:1100px){
   .menu{gap:2px}
   .menu a{padding:8px 11px;font-size:12.5px}
@@ -615,6 +628,7 @@ body:not(.authenticated) .topnav,body:not(.authenticated) .shell{display:none!im
       <a href="#devices">الأجهزة</a>
       <a href="#subscriptions">الاشتراكات</a>
       <a href="#hosts">الهوستات</a>
+      <a href="#app-updates">تحديثات التطبيق</a>
       <a href="#activity">سجل النشاط</a>
       <a href="#settings">الإعدادات</a>
     </nav>
@@ -829,6 +843,43 @@ body:not(.authenticated) .topnav,body:not(.authenticated) .shell{display:none!im
     </div>
   </section>
 
+  <!-- تحديثات التطبيق -->
+  <section class="block" id="app-updates">
+    <div class="block-head">
+      <div class="block-title"><span class="dot"></span> إدارة تحديثات SONIX</div>
+      <span class="pill pill-warn">النشر بموافقة المسؤول</span>
+    </div>
+    <div class="block-body">
+      <p class="empty-note">أنشئ إصداراً كمسودة، راجعه، ثم انشره للأجهزة المتوافقة. لن يصل أي إصدار إلى الأجهزة قبل النشر.</p>
+      <form id="release-form" class="release-form">
+        <div class="release-grid">
+          <label>اسم الإصدار<input id="release-version-name" maxlength="40" placeholder="مثال: 2.0.1" required></label>
+          <label>رقم الإصدار الداخلي<input id="release-version-code" type="number" min="1" step="1" placeholder="مثال: 201" required></label>
+          <label>قناة الإصدار<select id="release-channel"><option value="stable">مستقر Stable</option><option value="beta">تجريبي Beta</option></select></label>
+          <label>سياسة التحديث<select id="release-policy"><option value="optional">اختياري</option><option value="mandatory">إجباري</option></select></label>
+          <label>نوع الجهاز المستهدف<select id="release-platform"><option value="all">كل الأجهزة</option><option value="android_tv">Android TV</option><option value="android">Android</option></select></label>
+          <label>المعمارية<select id="release-abi"><option value="all">كل المعماريات</option><option value="armeabi-v7a">ARMv7</option><option value="arm64-v8a">ARM64</option><option value="x86">x86</option><option value="x86_64">x86_64</option></select></label>
+          <label class="release-wide">رابط APK في GitHub Releases<input id="release-apk-url" type="url" placeholder="https://github.com/.../releases/download/..." required></label>
+          <label class="release-wide">رابط صفحة الإصدار<input id="release-page-url" type="url" placeholder="https://github.com/.../releases/tag/..." required></label>
+          <label class="release-wide">SHA-256<input id="release-sha256" dir="ltr" maxlength="64" placeholder="64 hexadecimal characters" required></label>
+          <label>أقل Version Code مسموح<input id="release-min-code" type="number" min="0" step="1" value="0"></label>
+          <label>حجم APK بالبايت (اختياري)<input id="release-size" type="number" min="1" step="1"></label>
+          <label class="release-wide">الأجهزة المحددة (اتركه فارغاً لاستهداف كل الأجهزة)
+            <select id="release-target-devices" multiple size="4"></select>
+          </label>
+          <label class="release-wide">ملاحظات الإصدار<textarea id="release-notes" rows="3" maxlength="12000" placeholder="اكتب التحسينات والإصلاحات..."></textarea></label>
+        </div>
+        <div class="release-actions"><button class="btn btn-fill" id="release-create" type="submit">حفظ كمسودة</button><span id="release-form-status" class="release-hint">لا يتم النشر تلقائياً.</span></div>
+      </form>
+      <div class="table-scroll release-table">
+        <table class="data-table">
+          <thead><tr><th>الإصدار</th><th>القناة</th><th>الاستهداف</th><th>السياسة</th><th>الحالة</th><th>تاريخ النشر</th><th>الإجراءات</th></tr></thead>
+          <tbody id="releaseRows"><tr><td colspan="7">جارٍ تحميل الإصدارات...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- النشاط -->
   <section class="block" id="activity">
     <div class="block-head">
@@ -852,16 +903,23 @@ body:not(.authenticated) .topnav,body:not(.authenticated) .shell{display:none!im
 (()=> {
 const sb=window.supabase.createClient("https://ganqdgstfriegfwainoz.supabase.co","sb_publishable_yOn2frVZ8pJlzscXrzwZpw_8BeGXa1L");
 const $=s=>document.querySelector(s), esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const dt=v=>v?new Date(v).toLocaleDateString("ar"):"—";let devices=[],plans=[],servers=[];
+const dt=v=>v?new Date(v).toLocaleDateString("ar"):"—";let devices=[],plans=[],servers=[],releases=[];
 async function api(action,payload={}){const {data,error}=await sb.functions.invoke("admin-api",{body:{action,payload}});if(error)throw error;if(data?.error)throw Error(data.error+(data.detail?": "+data.detail:""));return data?.data??data;}
 async function load(){
 const s=await api("dashboard.summary"),n=[s.devices,s.activeDevices,s.expiredSubscriptions,s.activeServers];
 document.querySelectorAll(".stat-value").forEach((e,i)=>e.textContent=Number(n[i]??0).toLocaleString("en-US"));
-devices=await api("devices.list");plans=await api("plans.list");servers=await api("servers.list");
+devices=await api("devices.list");plans=await api("plans.list");servers=await api("servers.list");releases=await api("releases.list");
 $("#deviceRows").innerHTML=devices.length?devices.map(d=>{const sub=(d.subscriptions||[]).find(x=>x.status==="active"),host=(d.device_server_assignments||[])[0]?.servers?.name||"—",st=d.status==="blocked"?"محظور":d.status==="revoked"?"ملغي":sub&&new Date(sub.ends_at)<new Date()?"منتهي":"نشط",cl=st==="نشط"?"pill-ok":st==="محظور"||st==="ملغي"?"pill-bad":"pill-warn";return '<tr><td class="mono">'+esc(d.device_uid)+'</td><td>'+esc(d.device_name||d.model||d.platform)+'</td><td>'+esc(host)+'</td><td><span class="pill '+cl+'">'+st+'</span></td><td>'+dt(sub?.ends_at)+'</td><td><button data-block="'+esc(d.id)+'">'+(d.status==="blocked"?"رفع الحظر":"حظر")+'</button></td></tr>'}).join(""):'<tr><td colspan="6">لا توجد أجهزة مسجلة بعد</td></tr>';
 $("#deviceRows").querySelectorAll("[data-block]").forEach(b=>b.onclick=async()=>{const d=devices.find(x=>x.id===b.dataset.block);if(!d)return;if(!confirm("تأكيد تغيير حالة الجهاز؟"))return;await api("devices.update",{id:d.id,status:d.status==="blocked"?"active":"blocked"});await load();});
 $("#subscriptions tbody").innerHTML=devices.flatMap(d=>(d.subscriptions||[]).map(x=>({d,x}))).map(({d,x})=>'<tr><td class="mono">'+esc(d.device_uid)+'</td><td>'+esc(x.subscription_plans?.name||"اشتراك")+'</td><td>'+dt(x.starts_at)+'</td><td>'+dt(x.ends_at)+'</td><td>'+esc(x.status)+'</td></tr>').join("")||'<tr><td colspan="5">لا توجد اشتراكات</td></tr>';
 $(".hosts").innerHTML=servers.map(s=>'<div class="host-card"><div class="host-head"><div class="host-name">'+esc(s.name)+'</div><span class="pill '+(s.is_active?"pill-ok":"pill-warn")+'">'+(s.is_active?"نشط":"متوقف")+'</span></div><div class="host-url">'+esc(s.server_url)+'</div><div class="host-meta">'+esc(s.region||"")+' <span class="host-devices">أولوية '+esc(s.priority)+'</span></div></div>').join("")||'<p class="empty-note">لا توجد هوستات</p>';
+const targetSelect=$("#release-target-devices");
+if(targetSelect){const selected=new Set(Array.from(targetSelect.selectedOptions).map(o=>o.value));targetSelect.innerHTML=devices.map(d=>'<option value="'+esc(d.id)+'">'+esc(d.device_uid)+' · '+esc(d.device_name||d.model||d.platform)+'</option>').join("");Array.from(targetSelect.options).forEach(o=>o.selected=selected.has(o.value));}
+const releaseRows=$("#releaseRows");
+if(releaseRows){releaseRows.innerHTML=releases.length?releases.map(r=>{const state=r.status==="published"?"منشور":r.status==="disabled"?"متوقف":"مسودة",cls=r.status==="published"?"pill-ok":r.status==="disabled"?"pill-bad":"pill-warn",targets=(r.app_release_targets||[]).length?("أجهزة محددة: "+r.app_release_targets.length):"كل الأجهزة";return '<tr><td class="mono">'+esc(r.version_name)+' · '+esc(r.version_code)+'</td><td>'+esc(r.channel)+'</td><td>'+esc(targets)+'<br>'+esc(r.target_platform)+' / '+esc((r.target_abis||["all"]).join(", "))+'</td><td>'+ (r.update_policy==="mandatory"?"إجباري":"اختياري")+'</td><td><span class="pill '+cls+'">'+state+'</span></td><td>'+dt(r.published_at)+'</td><td>'+(r.status==="draft"?'<button data-release-publish="'+esc(r.id)+'">نشر</button>':'')+(r.status==="published"?'<button data-release-disable="'+esc(r.id)+'">إيقاف</button>':'')+'</td></tr>'}).join(""):'<tr><td colspan="7">لا توجد إصدارات بعد. أنشئ أول إصدار كمسودة.</td></tr>';
+releaseRows.querySelectorAll("[data-release-publish]").forEach(b=>b.onclick=async()=>{if(!confirm("نشر هذا الإصدار للأجهزة المستهدفة؟"))return;try{await api("releases.publish",{id:b.dataset.releasePublish});await load()}catch(e){alert(e.message)}});
+releaseRows.querySelectorAll("[data-release-disable]").forEach(b=>b.onclick=async()=>{if(!confirm("إيقاف هذا الإصدار ومنع تقديمه للأجهزة؟"))return;try{await api("releases.disable",{id:b.dataset.releaseDisable});await load()}catch(e){alert(e.message)}});
+}
 $("#activity .block-body").innerHTML=(s.recentActivity||[]).map(x=>'<p class="empty-note">'+esc(x.action)+' · '+esc(x.entity_type)+' · '+dt(x.created_at)+'</p>').join("")||'<p class="empty-note">لا توجد نشاطات بعد</p>';
 }
 async function signedIn(user){
@@ -874,6 +932,8 @@ $("#login-form").onsubmit=async e=>{e.preventDefault();const b=e.currentTarget.q
 sb.auth.getSession().then(({data})=>{if(data.session)signedIn(data.session.user)});
 sb.auth.onAuthStateChange((event,session)=>{if(event==="SIGNED_OUT"||!session){document.body.classList.remove("authenticated");$("#nova-login").style.display="grid"}});
 document.querySelectorAll(".btn").forEach(b=>{if(b.textContent.includes("إضافة جهاز"))b.onclick=async()=>{const uid=prompt("Device ID");if(!uid)return;const name=prompt("اسم الجهاز")||"";try{await api("devices.create",{device_uid:uid,device_name:name,platform:"android_tv"});await load()}catch(e){alert(e.message)}};if(b.textContent.includes("إضافة هوست"))b.onclick=async()=>{const name=prompt("اسم الهوست");if(!name)return;const server_url=prompt("رابط الخادم");if(!server_url)return;try{await api("servers.create",{name,server_url});await load()}catch(e){alert(e.message)}};if(b.textContent.includes("إضافة اشتراك"))b.onclick=async()=>{if(!devices.length||!plans.length){alert("أضف جهازاً وخطة أولاً");return}const uid=prompt("أدخل Device ID");const d=devices.find(x=>x.device_uid===uid);if(!d){alert("الجهاز غير موجود");return}const choice=Number(prompt(plans.map((p,i)=>(i+1)+": "+p.name+" ("+p.duration_days+" يوم)").join("\n")+"\nاختر رقم الخطة"));const p=plans[choice-1];if(!p)return;try{await api("subscriptions.create",{device_id:d.id,plan_id:p.id});await load()}catch(e){alert(e.message)}};if(b.textContent.includes("تصدير التقرير"))b.onclick=()=>{const csv=["Device ID,Name,Platform,Status",...devices.map(d=>[d.device_uid,d.device_name||"",d.platform,d.status].map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(","))].join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"}));a.download="nova-devices.csv";a.click();URL.revokeObjectURL(a.href)}});
+const releaseForm=$("#release-form");
+if(releaseForm)releaseForm.onsubmit=async e=>{e.preventDefault();const button=$("#release-create"),status=$("#release-form-status");button.disabled=true;button.textContent="جارٍ الحفظ...";status.textContent="التحقق من بيانات الإصدار...";const selected=Array.from($("#release-target-devices").selectedOptions).map(o=>o.value);const payload={version_name:$("#release-version-name").value.trim(),version_code:Number($("#release-version-code").value),channel:$("#release-channel").value,update_policy:$("#release-policy").value,target_platform:$("#release-platform").value,target_abis:[$("#release-abi").value],apk_url:$("#release-apk-url").value.trim(),release_url:$("#release-page-url").value.trim(),sha256:$("#release-sha256").value.trim().toLowerCase(),min_supported_version_code:Number($("#release-min-code").value||0),apk_size_bytes:$("#release-size").value?Number($("#release-size").value):null,target_device_ids:selected,release_notes:$("#release-notes").value};try{await api("releases.create",payload);releaseForm.reset();$("#release-min-code").value="0";status.textContent="تم حفظ الإصدار كمسودة. راجعه قبل النشر.";await load()}catch(error){status.textContent="تعذر الحفظ: "+error.message;alert(error.message)}finally{button.disabled=false;button.textContent="حفظ كمسودة"}};
 const search=$("#search");if(search)search.oninput=()=>document.querySelectorAll("#deviceRows tr").forEach(r=>r.style.display=r.innerText.toLowerCase().includes(search.value.toLowerCase())?"":"none");
 })();
 </script></body>
