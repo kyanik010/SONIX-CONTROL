@@ -75,6 +75,9 @@ Deno.serve(async (req: Request) => {
       const platform = body.platform === "android_tv" ? "android_tv" : "android";
       const abi = ["armeabi-v7a","arm64-v8a","x86","x86_64"].includes(String(body.app_abi))
         ? String(body.app_abi) : "unknown";
+      const deviceAbis = Array.isArray(body.app_abis)
+        ? body.app_abis.map(String).filter((value: string) => ["armeabi-v7a","arm64-v8a","x86","x86_64"].includes(value))
+        : [abi];
       const channel = body.channel === "beta" ? "beta" : "stable";
       const { data: candidates, error: releaseError } = await db.from("app_releases")
         .select("id,channel,version_name,version_code,apk_url,release_url,sha256,apk_size_bytes,release_notes,update_policy,target_platform,target_abis,min_supported_version_code,published_at,app_release_targets(device_id)")
@@ -87,7 +90,7 @@ Deno.serve(async (req: Request) => {
         app_release_targets:Array<{device_id:string}>;
       }) => {
         const platformMatches = release.target_platform === "all" || release.target_platform === platform;
-        const abiMatches = release.target_abis.includes("all") || release.target_abis.includes(abi);
+        const abiMatches = release.target_abis.includes("all") || release.target_abis.some((targetAbi: string) => deviceAbis.includes(targetAbi));
         const targets = release.app_release_targets ?? [];
         const deviceMatches = targets.length === 0 || targets.some((target) => target.device_id === device.id);
         return platformMatches && abiMatches && deviceMatches;
