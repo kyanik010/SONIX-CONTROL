@@ -39,10 +39,10 @@ Deno.serve(async (req: Request) => {
         os_version: String(body.os_version ?? "").slice(0,80) || null,
         app_version: String(body.app_version ?? "").slice(0,80) || null,
         status: "active",
-      }).select("id,status,first_seen_at").single();
+      }).select("id,status,first_seen_at,device_code").single();
       if (createError) {
         if (createError.code === "23505") {
-          const retry = await db.from("devices").select("id,status,first_seen_at").eq("device_uid", uid).single();
+          const retry = await db.from("devices").select("id,status,first_seen_at,device_code").eq("device_uid", uid).single();
           if (retry.error) return fail("device_register_failed", 500, retry.error.message);
           device = retry.data;
         } else return fail("device_register_failed", 500, createError.message);
