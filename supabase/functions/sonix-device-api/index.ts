@@ -26,7 +26,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const action = String(body.action ?? "sync");
-    let { data: device, error: findError } = await db.from("devices").select("id,status,first_seen_at").eq("device_uid", uid).maybeSingle();
+    let { data: device, error: findError } = await db.from("devices").select("id,status,first_seen_at,device_code").eq("device_uid", uid).maybeSingle();
     if (findError) return fail("device_lookup_failed", 500, findError.message);
 
     if (!device) {
@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
       app_abi: ["armeabi-v7a","arm64-v8a","x86","x86_64","unknown"].includes(String(body.app_abi)) ? String(body.app_abi) : undefined,
     }).eq("id", device.id);
 
-    if (device.status !== "active") return reply({ status: device.status, messages: [], servers: [], themes: [] });
+    if (device.status !== "active") return reply({ status: device.status, device_code: device.device_code, messages: [], servers: [], themes: [] });
 
     if (action === "app.update.check") {
       const currentVersionCode = Number.isSafeInteger(Number(body.app_version_code))
@@ -173,6 +173,7 @@ Deno.serve(async (req: Request) => {
       ?? (themes ?? [])[0] ?? null;
     return reply({
       status: "active",
+      device_code: device.device_code,
       servers: availableServers ?? [],
       themes: themes ?? [],
       theme,

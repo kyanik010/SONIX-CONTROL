@@ -209,7 +209,7 @@ Deno.serve(async (req: Request) => {
         return reply({ data }, 201);
       }
       case "subscriptions.list": {
-        const { data, error } = await db.from("subscriptions").select("*,devices(id,device_uid,device_name,platform),subscription_plans(id,code,name,duration_days)").order("created_at", { ascending: false }).limit(500);
+        const { data, error } = await db.from("subscriptions").select("*,devices(id,device_uid,device_code,device_name,platform),subscription_plans(id,code,name,duration_days)").order("created_at", { ascending: false }).limit(500);
         if (error) return fail("subscriptions_query_failed", 500, error.message);
         return reply({ data });
       }
