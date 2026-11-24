@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
+import { normalizeAppSettings } from "../sonix-device-api/core.ts";
 
 const allowedOrigin = "https://kyanik010.github.io";
 const corsHeaders = {
@@ -45,6 +46,7 @@ Deno.serve(async (req: Request) => {
   if (!admin || !admin.is_active) return fail("admin_access_denied", 403);
   const role = admin.role as string;
   const canWrite = role === "owner" || role === "admin" || role === "operator";
+  const isSupervisor = role === "owner" || role === "admin";
 
   let body: Record<string, unknown> = {};
   if (req.method !== "GET") {
@@ -54,6 +56,7 @@ Deno.serve(async (req: Request) => {
   const action = String(body.action ?? urlParams.get("action") ?? "");
   const payload = (body.payload && typeof body.payload === "object" ? body.payload : body) as Record<string, unknown>;
   const requireWrite = () => canWrite ? null : fail("read_only_role", 403);
+  const requireSupervisor = () => isSupervisor ? null : fail("admin_role_required", 403);
 
   const audit = async (actionName: string, entityType: string, entityId?: string, details: Record<string, unknown> = {}) => {
     const { error } = await db.from("audit_logs").insert({
@@ -66,12 +69,13 @@ Deno.serve(async (req: Request) => {
   try {
     switch (action) {
       case "dashboard.summary": {
+        const nowIso = new Date().toISOString();
         const [devices, activeDevices, blockedDevices, subscriptions, expiredSubscriptions, servers, recentLogs] = await Promise.all([
           db.from("devices").select("id", { count: "exact", head: true }),
           db.from("devices").select("id", { count: "exact", head: true }).eq("status", "active"),
           db.from("devices").select("id", { count: "exact", head: true }).eq("status", "blocked"),
-          db.from("subscriptions").select("id", { count: "exact", head: true }).eq("status", "active"),
-          db.from("subscriptions").select("id", { count: "exact", head: true }).or("status.eq.expired,ends_at.lt." + new Date().toISOString()),
+          db.from("subscriptions").select("id", { count: "exact", head: true }).eq("status", "active").gt("ends_at", nowIso),
+          db.from("subscriptions").select("id", { count: "exact", head: true }).or("status.eq.expired,ends_at.lt." + nowIso),
           db.from("servers").select("id", { count: "exact", head: true }).eq("is_active", true),
           db.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(8),
         ]);
@@ -79,6 +83,7 @@ Deno.serve(async (req: Request) => {
           if (result.error) return fail("summary_query_failed", 500, result.error.message);
         }
         return reply({ data: {
+          currentRole: role,
           devices: devices.count ?? 0, activeDevices: activeDevices.count ?? 0,
           blockedDevices: blockedDevices.count ?? 0, activeSubscriptions: subscriptions.count ?? 0,
           expiredSubscriptions: expiredSubscriptions.count ?? 0, activeServers: servers.count ?? 0,
@@ -86,9 +91,20 @@ Deno.serve(async (req: Request) => {
         }});
       }
       case "devices.list": {
-        const { data, error } = await db.from("devices").select("*,subscriptions(id,status,starts_at,ends_at,subscription_plans(name,code,duration_days)),device_trials(status,started_at,ends_at),device_server_assignments(server_id,servers(id,name,region,is_active)),device_audio_sources(m3u_url,updated_at)").order("last_seen_at", { ascending: false }).limit(500);
+        const { data, error } = await db
+          .from("devices")
+          .select("id,device_uid,device_code,device_name,platform,manufacturer,model,os_version,app_version,app_version_code,app_abi,status,first_seen_at,last_seen_at,device_token_hash,device_token_issued_at,subscriptions(id,status,starts_at,ends_at,subscription_plans(name,code,duration_days)),device_trials(id,status,started_at,ends_at),device_server_assignments(server_id,servers(id,name,region,is_active)),device_audio_sources(m3u_url,updated_at)")
+          .order("last_seen_at", { ascending: false })
+          .limit(500);
         if (error) return fail("devices_query_failed", 500, error.message);
-        return reply({ data });
+        const sanitized = (data ?? []).map((row: Record<string, unknown>) => {
+          const { device_token_hash, ...rest } = row;
+          return {
+            ...rest,
+            has_device_token: Boolean(device_token_hash),
+          };
+        });
+        return reply({ data: sanitized });
       }
       case "devices.create": {
         const denied = requireWrite(); if (denied) return denied;
@@ -104,7 +120,7 @@ Deno.serve(async (req: Request) => {
           app_version: payload.app_version ? String(payload.app_version).slice(0,80) : null,
           status: "active",
         };
-        const { data, error } = await db.from("devices").insert(row).select().single();
+        const { data, error } = await db.from("devices").insert(row).select("id,device_uid,device_code,device_name,platform,status,first_seen_at,last_seen_at").single();
         if (error) return fail("device_create_failed", 400, error.message);
         const { data: trialConfig } = await db.from("app_config").select("config_value").eq("config_key", "trial_duration_days").maybeSingle();
         const trialDays = Math.max(1, Math.min(365, Number(trialConfig?.config_value ?? 30) || 30));
@@ -128,19 +144,49 @@ Deno.serve(async (req: Request) => {
           if (payload[key] !== undefined) patch[key] = payload[key];
         }
         if (patch.status && !["active","blocked","revoked"].includes(String(patch.status))) return fail("invalid_status");
-        const { data, error } = await db.from("devices").update(patch).eq("id", id).select().single();
+        const { data, error } = await db.from("devices").update(patch).eq("id", id).select("id,device_uid,device_code,device_name,platform,status").single();
         if (error) return fail("device_update_failed", 400, error.message);
         await audit("device_updated", "devices", id, patch);
         return reply({ data });
+      }
+      case "devices.reset_token": {
+        const denied = requireWrite(); if (denied) return denied;
+        const id = String(payload.id ?? "");
+        if (!id) return fail("device_id_required");
+        const { data, error } = await db
+          .from("devices")
+          .update({ device_token_hash: null, device_token_issued_at: null })
+          .eq("id", id)
+          .select("id,device_uid,device_code")
+          .maybeSingle();
+        if (error) return fail("device_token_reset_failed", 400, error.message);
+        if (!data) return fail("device_not_found", 404);
+        await audit("device_token_reset", "devices", id, { device_uid: data.device_uid });
+        return reply({ data, success: true });
+      }
+      case "devices.delete": {
+        const denied = requireSupervisor(); if (denied) return denied;
+        const id = String(payload.id ?? "");
+        if (!id) return fail("device_id_required");
+        const { error } = await db.from("devices").delete().eq("id", id);
+        if (error) return fail("device_delete_failed", 400, error.message);
+        await audit("device_deleted", "devices", id);
+        return reply({ success: true });
       }
       case "devices.assign_server": {
         const denied = requireWrite(); if (denied) return denied;
         const deviceId = String(payload.device_id ?? "");
         const serverId = String(payload.server_id ?? "");
         if (!deviceId || !serverId) return fail("device_and_server_required");
+        const [devCheck, srvCheck] = await Promise.all([
+          db.from("devices").select("id").eq("id", deviceId).maybeSingle(),
+          db.from("servers").select("id").eq("id", serverId).maybeSingle(),
+        ]);
+        if (!devCheck.data) return fail("device_not_found", 404);
+        if (!srvCheck.data) return fail("server_not_found", 404);
         const { data, error } = await db.from("device_server_assignments").upsert({
           device_id: deviceId, server_id: serverId, assigned_by: user.id, assigned_at: new Date().toISOString(),
-        }, { onConflict: "device_id,server_id", ignoreDuplicates: true }).select().single();
+        }, { onConflict: "device_id,server_id" }).select().single();
         if (error) return fail("server_assignment_failed", 400, error.message);
         await audit("server_assigned_to_device", "device_server_assignments", data.id, { device_id: deviceId, server_id: serverId });
         return reply({ data });
@@ -195,11 +241,17 @@ Deno.serve(async (req: Request) => {
       }
       case "plans.create": {
         const denied = requireWrite(); if (denied) return denied;
+        const code = String(payload.code ?? "").trim().toLowerCase();
+        const name = String(payload.name ?? "").trim();
+        const durationDays = Number(payload.duration_days);
+        if (!code || !name || !Number.isFinite(durationDays) || durationDays <= 0) {
+          return fail("invalid_plan_payload");
+        }
         const row = {
-          code: String(payload.code ?? "").trim().toLowerCase(),
-          name: String(payload.name ?? "").trim(),
-          duration_days: Number(payload.duration_days),
-          price_minor_units: payload.price_minor_units == null ? null : Number(payload.price_minor_units),
+          code,
+          name,
+          duration_days: Math.round(durationDays),
+          price_minor_units: payload.price_minor_units == null || payload.price_minor_units === "" ? null : Number(payload.price_minor_units),
           currency_code: String(payload.currency_code ?? "USD").toUpperCase(),
           is_active: payload.is_active !== false,
         };
@@ -207,6 +259,26 @@ Deno.serve(async (req: Request) => {
         if (error) return fail("plan_create_failed", 400, error.message);
         await audit("plan_created", "subscription_plans", data.id, { code: row.code });
         return reply({ data }, 201);
+      }
+      case "plans.update": {
+        const denied = requireWrite(); if (denied) return denied;
+        const id = String(payload.id ?? "");
+        if (!id) return fail("plan_id_required");
+        const patch: Record<string, unknown> = {};
+        if (payload.name !== undefined) patch.name = String(payload.name).trim();
+        if (payload.duration_days !== undefined) {
+          const days = Number(payload.duration_days);
+          if (!Number.isFinite(days) || days <= 0) return fail("invalid_duration_days");
+          patch.duration_days = Math.round(days);
+        }
+        if (payload.is_active !== undefined) patch.is_active = Boolean(payload.is_active);
+        if (payload.price_minor_units !== undefined) {
+          patch.price_minor_units = payload.price_minor_units == null || payload.price_minor_units === "" ? null : Number(payload.price_minor_units);
+        }
+        const { data, error } = await db.from("subscription_plans").update(patch).eq("id", id).select().single();
+        if (error) return fail("plan_update_failed", 400, error.message);
+        await audit("plan_updated", "subscription_plans", id, patch);
+        return reply({ data });
       }
       case "subscriptions.list": {
         const { data, error } = await db.from("subscriptions").select("*,devices(id,device_uid,device_code,device_name,platform),subscription_plans(id,code,name,duration_days)").order("created_at", { ascending: false }).limit(500);
@@ -233,6 +305,27 @@ Deno.serve(async (req: Request) => {
         await audit("subscription_created", "subscriptions", data.id, { device_id: deviceId, ends_at: ends.toISOString() });
         return reply({ data }, 201);
       }
+      case "subscriptions.extend": {
+        const denied = requireWrite(); if (denied) return denied;
+        const id = String(payload.id ?? "");
+        const extraDays = Number(payload.extra_days ?? 30);
+        if (!id) return fail("subscription_id_required");
+        if (!Number.isFinite(extraDays) || extraDays < 1 || extraDays > 3650) return fail("invalid_extra_days");
+        const { data: current, error: lookupError } = await db.from("subscriptions").select("id,ends_at,status").eq("id", id).maybeSingle();
+        if (lookupError) return fail("subscription_lookup_failed", 500, lookupError.message);
+        if (!current) return fail("subscription_not_found", 404);
+        const baseMs = Math.max(Date.now(), Date.parse(current.ends_at) || Date.now());
+        const nextEnds = new Date(baseMs + Math.round(extraDays) * 86400000).toISOString();
+        const { data, error } = await db
+          .from("subscriptions")
+          .update({ status: "active", ends_at: nextEnds })
+          .eq("id", id)
+          .select()
+          .single();
+        if (error) return fail("subscription_extend_failed", 400, error.message);
+        await audit("subscription_extended", "subscriptions", id, { extra_days: Math.round(extraDays), ends_at: nextEnds });
+        return reply({ data });
+      }
       case "subscriptions.revoke": {
         const denied = requireWrite(); if (denied) return denied;
         const id = String(payload.id ?? "");
@@ -243,15 +336,33 @@ Deno.serve(async (req: Request) => {
         return reply({ data });
       }
       case "servers.list": {
-        const { data, error } = await db.from("servers").select("id,name,server_url,region,priority,is_active,notes,created_at").order("priority");
+        const [{ data: servers, error }, { data: assignments }] = await Promise.all([
+          db.from("servers").select("id,name,server_url,region,priority,is_active,notes,created_at").order("priority"),
+          db.from("device_server_assignments").select("server_id"),
+        ]);
         if (error) return fail("servers_query_failed", 500, error.message);
-        return reply({ data });
+        const counts = new Map<string, number>();
+        for (const a of (assignments ?? [])) {
+          const sid = String(a.server_id ?? "");
+          counts.set(sid, (counts.get(sid) ?? 0) + 1);
+        }
+        const enriched = (servers ?? []).map((s: Record<string, unknown>) => ({
+          ...s,
+          assigned_devices_count: counts.get(String(s.id ?? "")) ?? 0,
+        }));
+        return reply({ data: enriched });
       }
       case "servers.create": {
         const denied = requireWrite(); if (denied) return denied;
+        const name = String(payload.name ?? "").trim();
+        const serverUrl = String(payload.server_url ?? "").trim();
+        if (!name || name.length > 120) return fail("invalid_server_name");
+        if (!/^https?:\/\//i.test(serverUrl) || serverUrl.length < 10 || serverUrl.length > 2048) {
+          return fail("invalid_server_url");
+        }
         const row = {
-          name: String(payload.name ?? "").trim(),
-          server_url: String(payload.server_url ?? "").trim(),
+          name,
+          server_url: serverUrl,
           region: payload.region ? String(payload.region).slice(0,80) : null,
           priority: Number(payload.priority ?? 100),
           is_active: payload.is_active !== false,
@@ -269,10 +380,56 @@ Deno.serve(async (req: Request) => {
         if (!id) return fail("server_id_required");
         const patch: Record<string, unknown> = {};
         for (const key of ["name","server_url","region","priority","is_active","notes"]) if (payload[key] !== undefined) patch[key] = payload[key];
+        if (patch.name !== undefined && (!String(patch.name).trim() || String(patch.name).trim().length > 120)) return fail("invalid_server_name");
+        if (patch.server_url !== undefined && !/^https?:\/\//i.test(String(patch.server_url).trim())) return fail("invalid_server_url");
         const { data, error } = await db.from("servers").update(patch).eq("id", id).select("id,name,server_url,region,priority,is_active,notes,created_at").single();
         if (error) return fail("server_update_failed", 400, error.message);
         await audit("server_updated", "servers", id, { changed_fields: Object.keys(patch) });
         return reply({ data });
+      }
+      case "servers.delete": {
+        const denied = requireSupervisor(); if (denied) return denied;
+        const id = String(payload.id ?? "");
+        if (!id) return fail("server_id_required");
+        const { error } = await db.from("servers").delete().eq("id", id);
+        if (error) return fail("server_delete_failed", 400, error.message);
+        await audit("server_deleted", "servers", id);
+        return reply({ success: true });
+      }
+      case "config.list": {
+        const { data, error } = await db.from("app_config").select("config_key,config_value");
+        if (error) return fail("config_query_failed", 500, error.message);
+        return reply({ data: normalizeAppSettings(data ?? []) });
+      }
+      case "config.update": {
+        const denied = requireSupervisor(); if (denied) return denied;
+        const updates: Array<{ config_key: string; config_value: string }> = [];
+        if (payload.trial_duration_days !== undefined) {
+          const days = Math.max(1, Math.min(365, Math.round(Number(payload.trial_duration_days) || 30)));
+          updates.push({ config_key: "trial_duration_days", config_value: String(days) });
+        }
+        if (payload.maintenance_mode !== undefined) {
+          updates.push({ config_key: "maintenance_mode", config_value: payload.maintenance_mode ? "true" : "false" });
+        }
+        if (payload.maintenance_message !== undefined) {
+          updates.push({ config_key: "maintenance_message", config_value: String(payload.maintenance_message).slice(0, 500) });
+        }
+        if (payload.support_notice !== undefined) {
+          updates.push({ config_key: "support_notice", config_value: String(payload.support_notice).slice(0, 500) });
+        }
+        if (payload.allow_normal_url_login !== undefined) {
+          updates.push({ config_key: "allow_normal_url_login", config_value: payload.allow_normal_url_login ? "true" : "false" });
+        }
+        if (payload.allow_panel_servers !== undefined) {
+          updates.push({ config_key: "allow_panel_servers", config_value: payload.allow_panel_servers ? "true" : "false" });
+        }
+        if (updates.length) {
+          const { error } = await db.from("app_config").upsert(updates, { onConflict: "config_key" });
+          if (error) return fail("config_update_failed", 400, error.message);
+          await audit("app_config_updated", "app_config", "global", { keys: updates.map((u) => u.config_key) });
+        }
+        const { data } = await db.from("app_config").select("config_key,config_value");
+        return reply({ data: normalizeAppSettings(data ?? []) });
       }
       case "themes.list": {
         const { data, error } = await db.from("app_themes").select("*").order("sort_order").order("created_at");
@@ -317,9 +474,21 @@ Deno.serve(async (req: Request) => {
         return reply({ data });
       }
       case "messages.list": {
-        const { data, error } = await db.from("app_messages").select("*,devices(id,device_uid,device_name)").order("created_at", { ascending: false }).limit(300);
+        const [{ data, error }, { data: receipts }] = await Promise.all([
+          db.from("app_messages").select("*,devices(id,device_uid,device_code,device_name)").order("created_at", { ascending: false }).limit(300),
+          db.from("device_message_receipts").select("message_id").not("acknowledged_at", "is", null),
+        ]);
         if (error) return fail("messages_query_failed", 500, error.message);
-        return reply({ data });
+        const counts = new Map<string, number>();
+        for (const r of (receipts ?? [])) {
+          const mid = String(r.message_id ?? "");
+          counts.set(mid, (counts.get(mid) ?? 0) + 1);
+        }
+        const enriched = (data ?? []).map((m: Record<string, unknown>) => ({
+          ...m,
+          acknowledged_count: counts.get(String(m.id ?? "")) ?? 0,
+        }));
+        return reply({ data: enriched });
       }
       case "messages.create": {
         const denied = requireWrite(); if (denied) return denied;
@@ -367,7 +536,7 @@ Deno.serve(async (req: Request) => {
       }
       case "releases.list": {
         const { data, error } = await db.from("app_releases")
-          .select("*,app_release_targets(device_id,devices(device_uid,device_name,model))")
+          .select("*,app_release_targets(device_id,devices(device_uid,device_code,device_name,model))")
           .order("created_at", { ascending: false }).limit(200);
         if (error) return fail("releases_query_failed", 500, error.message);
         return reply({ data: data ?? [] });
@@ -436,11 +605,12 @@ Deno.serve(async (req: Request) => {
           if (!Number.isSafeInteger(code) || code <= 0) return fail("invalid_release_version_code");
           patch.version_code = code;
         }
-        for (const key of ["apk_url","release_url","release_notes","channel","update_policy","target_platform","target_abis","min_supported_version_code","apk_size_bytes"]) {
+        for (const key of ["apk_url","release_url","sha256","release_notes","channel","update_policy","target_platform","target_abis","min_supported_version_code","apk_size_bytes"]) {
           if (payload[key] !== undefined) patch[key] = payload[key];
         }
         if (patch.apk_url !== undefined && !/^https:\/\//i.test(String(patch.apk_url))) return fail("invalid_apk_url");
         if (patch.release_url !== undefined && !/^https:\/\//i.test(String(patch.release_url))) return fail("invalid_release_url");
+        if (patch.sha256 !== undefined && !/^[0-9a-f]{64}$/i.test(String(patch.sha256))) return fail("invalid_release_sha256");
         if (patch.release_notes !== undefined) patch.release_notes = String(patch.release_notes).slice(0,12000);
         patch.updated_at = new Date().toISOString();
         const { data, error } = await db.from("app_releases").update(patch).eq("id", id).select().single();
@@ -490,6 +660,12 @@ Deno.serve(async (req: Request) => {
           version_name: data.version_name, version_code: data.version_code,
         });
         return reply({ data });
+      }
+      case "admins.list": {
+        const denied = requireSupervisor(); if (denied) return denied;
+        const { data, error } = await db.from("admin_users").select("id,user_id,role,is_active,created_at").order("created_at");
+        if (error) return fail("admins_query_failed", 500, error.message);
+        return reply({ data: data ?? [] });
       }
       case "activity.list": {
         const { data, error } = await db.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(100);
