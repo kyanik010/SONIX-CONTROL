@@ -308,6 +308,26 @@ Deno.serve(async (req: Request) => {
       return fail("subscription_expired", 403);
     }
 
+    if (action === "servers.catalog") {
+      const { data: servers, error: serverError } = await db
+        .from("servers")
+        .select("id,name,region,priority,is_active")
+        .eq("is_active", true)
+        .order("priority", { ascending: true })
+        .order("name", { ascending: true });
+      if (serverError) return fail("servers_fetch_failed", 500, serverError.message);
+      return reply({
+        status: access.access_status,
+        access_allowed: true,
+        servers: (servers ?? []).map((server) => ({
+          id: server.id,
+          name: server.name,
+          region: server.region ?? null,
+          priority: Number(server.priority ?? 100),
+        })),
+      });
+    }
+
     if (action === "servers.list") {
       const { data: assignmentRows, error: serverError } = await db
         .from("device_server_assignments")
@@ -325,19 +345,23 @@ Deno.serve(async (req: Request) => {
     if (action === "server.resolve") {
       const serverId = String(body.server_id ?? "").trim();
       if (!serverId) return fail("server_id_required");
-      const { data: assignmentRows, error: serverError } = await db
-        .from("device_server_assignments")
-        .select("server_id,assigned_at,servers!inner(id,name,region,server_url,priority,is_active)")
-        .eq("device_id", device.id)
-        .eq("server_id", serverId)
-        .eq("servers.is_active", true);
+      const { data: server, error: serverError } = await db
+        .from("servers")
+        .select("id,name,region,server_url,is_active")
+        .eq("id", serverId)
+        .eq("is_active", true)
+        .maybeSingle();
       if (serverError) return fail("server_resolve_failed", 500, serverError.message);
-      const resolved = resolveAssignedServer(assignmentRows ?? [], serverId);
-      if (!resolved) return fail("server_not_assigned", 403);
+      if (!server || !server.server_url) return fail("server_not_assigned", 404);
       return reply({
         status: access.access_status,
         access_allowed: true,
-        server: resolved,
+        server: {
+          id: server.id,
+          name: server.name,
+          region: server.region ?? null,
+          server_url: server.server_url,
+        },
       });
     }
 
