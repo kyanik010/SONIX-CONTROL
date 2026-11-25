@@ -51,6 +51,27 @@ Deno.serve(async (req: Request) => {
       req.headers.get("x-sonix-device-token") ?? body.device_token ?? "",
     ).trim();
 
+    // Public catalog: expose only active server IDs and display metadata.
+    // Never return server_url here; resolving a server still requires a valid
+    // device token, active device status, and an active entitlement below.
+    if (action === "servers.catalog") {
+      const { data: catalog, error: catalogError } = await db
+        .from("servers")
+        .select("id,name,region,priority,is_active")
+        .eq("is_active", true)
+        .order("priority", { ascending: true })
+        .order("name", { ascending: true });
+      if (catalogError) return fail("servers_fetch_failed", 500, catalogError.message);
+      return reply({
+        servers: (catalog ?? []).map((server) => ({
+          id: server.id,
+          name: server.name,
+          region: server.region ?? null,
+          priority: Number(server.priority ?? 100),
+        })),
+      });
+    }
+
     let { data: device, error: findError } = await db
       .from("devices")
       .select("id,device_uid,status,first_seen_at,device_code,device_token_hash")
@@ -305,26 +326,6 @@ Deno.serve(async (req: Request) => {
         return reply({ success: true });
       }
       return fail("subscription_expired", 403);
-    }
-
-    if (action === "servers.catalog") {
-      const { data: servers, error: serverError } = await db
-        .from("servers")
-        .select("id,name,region,priority,is_active")
-        .eq("is_active", true)
-        .order("priority", { ascending: true })
-        .order("name", { ascending: true });
-      if (serverError) return fail("servers_fetch_failed", 500, serverError.message);
-      return reply({
-        status: access.access_status,
-        access_allowed: true,
-        servers: (servers ?? []).map((server) => ({
-          id: server.id,
-          name: server.name,
-          region: server.region ?? null,
-          priority: Number(server.priority ?? 100),
-        })),
-      });
     }
 
     if (action === "servers.list") {
