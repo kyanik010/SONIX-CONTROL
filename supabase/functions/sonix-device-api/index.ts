@@ -5,7 +5,6 @@ import {
   filterPendingMessages,
   generateDeviceToken,
   normalizeAppSettings,
-  resolveAssignedServer,
   selectCompatibleRelease,
   sha256Hex,
   timingSafeEqualHex,
