@@ -133,6 +133,21 @@ Deno.serve(async (req: Request) => {
         await audit("device_updated", "devices", id, patch);
         return reply({ data });
       }
+      case "devices.reset_token": {
+        const denied = requireWrite(); if (denied) return denied;
+        const id = String(payload.id ?? "");
+        if (!id) return fail("device_id_required");
+        const { data, error } = await db
+          .from("devices")
+          .update({ device_token_hash: null, device_token_issued_at: null })
+          .eq("id", id)
+          .select("id,device_uid,device_code")
+          .maybeSingle();
+        if (error) return fail("device_token_reset_failed", 400, error.message);
+        if (!data) return fail("device_not_found", 404);
+        await audit("device_token_reset", "devices", id, { device_uid: data.device_uid });
+        return reply({ data, success: true });
+      }
       case "devices.assign_server": {
         const denied = requireWrite(); if (denied) return denied;
         const deviceId = String(payload.device_id ?? "");
